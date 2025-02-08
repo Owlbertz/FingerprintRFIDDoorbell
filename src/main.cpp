@@ -1,5 +1,5 @@
 /***************************************************
-  Main of FingerprintDoorbell 
+  Main of FingerprintDoorbell
  ****************************************************/
 
 #include <WiFi.h>
@@ -13,28 +13,34 @@
 #include "SettingsManager.h"
 #include "global.h"
 
-enum class Mode { scan, enroll, wificonfig, maintenance };
+enum class Mode
+{
+  scan,
+  enroll,
+  wificonfig,
+  maintenance
+};
 
-const char* VersionInfo = "0.4";
+const char *VersionInfo = "0.4";
 
 // ===================================================================================================================
 // Caution: below are not the credentials for connecting to your home network, they are for the Access Point mode!!!
 // ===================================================================================================================
-const char* WifiConfigSsid = "FingerprintDoorbell-Config"; // SSID used for WiFi when in Access Point mode for configuration
-const char* WifiConfigPassword = "12345678"; // password used for WiFi when in Access Point mode for configuration. Min. 8 chars needed!
-IPAddress   WifiConfigIp(192, 168, 4, 1); // IP of access point in wifi config mode
+const char *WifiConfigSsid = "FingerprintDoorbell-Config"; // SSID used for WiFi when in Access Point mode for configuration
+const char *WifiConfigPassword = "12345678";               // password used for WiFi when in Access Point mode for configuration. Min. 8 chars needed!
+IPAddress WifiConfigIp(192, 168, 4, 1);                    // IP of access point in wifi config mode
 
-const long  gmtOffset_sec = 0; // UTC Time
-const int   daylightOffset_sec = 0; // UTC Time
-const int   doorbellOutputPin = 19; // pin connected to the doorbell (when using hardware connection instead of mqtt to ring the bell)
+const long gmtOffset_sec = 0;     // UTC Time
+const int daylightOffset_sec = 0; // UTC Time
+const int doorbellOutputPin = 19; // pin connected to the doorbell (when using hardware connection instead of mqtt to ring the bell)
 
 #ifdef CUSTOM_GPIOS
-  const int   customOutput1 = 18; // not used internally, but can be set over MQTT
-  const int   customOutput2 = 26; // not used internally, but can be set over MQTT
-  const int   customInput1 = 21; // not used internally, but changes are published over MQTT
-  const int   customInput2 = 22; // not used internally, but changes are published over MQTT
-  bool customInput1Value = false;
-  bool customInput2Value = false;
+const int customOutput1 = 18; // not used internally, but can be set over MQTT
+const int customOutput2 = 26; // not used internally, but can be set over MQTT
+const int customInput1 = 21;  // not used internally, but changes are published over MQTT
+const int customInput2 = 22;  // not used internally, but changes are published over MQTT
+bool customInput1Value = false;
+bool customInput2Value = false;
 #endif
 
 const int logMessagesCount = 5;
@@ -53,7 +59,7 @@ bool needMaintenanceMode = false;
 
 const byte DNS_PORT = 53;
 DNSServer dnsServer;
-AsyncWebServer webServer(80); // AsyncWebServer  on port 80
+AsyncWebServer webServer(80);       // AsyncWebServer  on port 80
 AsyncEventSource events("/events"); // event source (Server-Sent events)
 
 WiFiClient espClient;
@@ -63,44 +69,51 @@ char msg[50];
 int value = 0;
 bool mqttConfigValid = true;
 
-
 Match lastMatch;
 
-void addLogMessage(const String& message) {
+void addLogMessage(const String &message)
+{
   // shift all messages in array by 1, oldest message will die
-  for (int i=logMessagesCount-1; i>0; i--)
-    logMessages[i]=logMessages[i-1];
-  logMessages[0]=message;
+  for (int i = logMessagesCount - 1; i > 0; i--)
+    logMessages[i] = logMessages[i - 1];
+  logMessages[0] = message;
 }
 
-String getLogMessagesAsHtml() {
+String getLogMessagesAsHtml()
+{
   String html = "";
-  for (int i=logMessagesCount-1; i>=0; i--) {
-    if (logMessages[i]!="")
+  for (int i = logMessagesCount - 1; i >= 0; i--)
+  {
+    if (logMessages[i] != "")
       html = html + logMessages[i] + "<br>";
   }
   return html;
 }
 
-String getTimestampString(){
+String getTimestampString()
+{
   struct tm timeinfo;
-  if(!getLocalTime(&timeinfo)){
+  if (!getLocalTime(&timeinfo))
+  {
     Serial.println("Failed to obtain time");
     return "no time";
   }
-  
+
   char buffer[25];
-  strftime(buffer,sizeof(buffer),"%Y-%m-%d %H:%M:%S %Z", &timeinfo);
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
   String datetime = String(buffer);
   return datetime;
 }
 
 /* wait for maintenance mode or timeout 5s */
-bool waitForMaintenanceMode() {
+bool waitForMaintenanceMode()
+{
   needMaintenanceMode = true;
   unsigned long startMillis = millis();
-  while (currentMode != Mode::maintenance) {
-    if ((millis() - startMillis) >= 5000ul) {
+  while (currentMode != Mode::maintenance)
+  {
+    if ((millis() - startMillis) >= 5000ul)
+    {
       needMaintenanceMode = false;
       return false;
     }
@@ -111,94 +124,125 @@ bool waitForMaintenanceMode() {
 }
 
 // Replaces placeholder in HTML pages
-String processor(const String& var){
-  if(var == "LOGMESSAGES"){
+String processor(const String &var)
+{
+  if (var == "LOGMESSAGES")
+  {
     return getLogMessagesAsHtml();
-  } else if (var == "FINGERLIST") {
+  }
+  else if (var == "FINGERLIST")
+  {
     return fingerManager.getFingerListAsHtmlOptionList();
-  } else if (var == "HOSTNAME") {
+  }
+  else if (var == "HOSTNAME")
+  {
     return settingsManager.getWifiSettings().hostname;
-  } else if (var == "VERSIONINFO") {
+  }
+  else if (var == "VERSIONINFO")
+  {
     return VersionInfo;
-  } else if (var == "WIFI_SSID") {
+  }
+  else if (var == "WIFI_SSID")
+  {
     return settingsManager.getWifiSettings().ssid;
-  } else if (var == "WIFI_PASSWORD") {
+  }
+  else if (var == "WIFI_PASSWORD")
+  {
     if (settingsManager.getWifiSettings().password.isEmpty())
       return "";
     else
       return "********"; // for security reasons the wifi password will not left the device once configured
-  } else if (var == "MQTT_SERVER") {
+  }
+  else if (var == "MQTT_SERVER")
+  {
     return settingsManager.getAppSettings().mqttServer;
-  } else if (var == "MQTT_USERNAME") {
+  }
+  else if (var == "MQTT_USERNAME")
+  {
     return settingsManager.getAppSettings().mqttUsername;
-  } else if (var == "MQTT_PASSWORD") {
+  }
+  else if (var == "MQTT_PASSWORD")
+  {
     return settingsManager.getAppSettings().mqttPassword;
-  } else if (var == "MQTT_ROOTTOPIC") {
+  }
+  else if (var == "MQTT_ROOTTOPIC")
+  {
     return settingsManager.getAppSettings().mqttRootTopic;
-  } else if (var == "NTP_SERVER") {
+  }
+  else if (var == "NTP_SERVER")
+  {
     return settingsManager.getAppSettings().ntpServer;
   }
 
   return String();
 }
 
-
 // send LastMessage to websocket clients
-void notifyClients(String message) {
+void notifyClients(String message)
+{
   String messageWithTimestamp = "[" + getTimestampString() + "]: " + message;
   Serial.println(messageWithTimestamp);
   addLogMessage(messageWithTimestamp);
-  events.send(getLogMessagesAsHtml().c_str(),"message",millis(),1000);
-  
+  events.send(getLogMessagesAsHtml().c_str(), "message", millis(), 1000);
+
   String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
   mqttClient.publish((String(mqttRootTopic) + "/lastLogMessage").c_str(), message.c_str());
 }
 
-void updateClientsFingerlist(String fingerlist) {
+void updateClientsFingerlist(String fingerlist)
+{
   Serial.println("New fingerlist was sent to clients");
-  events.send(fingerlist.c_str(),"fingerlist",millis(),1000);
+  events.send(fingerlist.c_str(), "fingerlist", millis(), 1000);
 }
 
-
-bool doPairing() {
+bool doPairing()
+{
   String newPairingCode = settingsManager.generateNewPairingCode();
 
-  if (fingerManager.setPairingCode(newPairingCode)) {
+  if (fingerManager.setPairingCode(newPairingCode))
+  {
     AppSettings settings = settingsManager.getAppSettings();
     settings.sensorPairingCode = newPairingCode;
     settings.sensorPairingValid = true;
     settingsManager.saveAppSettings(settings);
     notifyClients("Pairing successful.");
     return true;
-  } else {
+  }
+  else
+  {
     notifyClients("Pairing failed.");
     return false;
   }
-
 }
 
-
-bool checkPairingValid() {
+bool checkPairingValid()
+{
   AppSettings settings = settingsManager.getAppSettings();
 
-   if (!settings.sensorPairingValid) {
-     if (settings.sensorPairingCode.isEmpty()) {
-       // first boot, do pairing automatically so the user does not have to do this manually
-       return doPairing();
-     } else {
-      Serial.println("Pairing has been invalidated previously.");   
+  if (!settings.sensorPairingValid)
+  {
+    if (settings.sensorPairingCode.isEmpty())
+    {
+      // first boot, do pairing automatically so the user does not have to do this manually
+      return doPairing();
+    }
+    else
+    {
+      Serial.println("Pairing has been invalidated previously.");
       return false;
-     }
-   }
+    }
+  }
 
   String actualSensorPairingCode = fingerManager.getPairingCode();
-  //Serial.println("Awaited pairing code: " + settings.sensorPairingCode);
-  //Serial.println("Actual pairing code: " + actualSensorPairingCode);
+  // Serial.println("Awaited pairing code: " + settings.sensorPairingCode);
+  // Serial.println("Actual pairing code: " + actualSensorPairingCode);
 
   if (actualSensorPairingCode.equals(settings.sensorPairingCode))
     return true;
-  else {
-    if (!actualSensorPairingCode.isEmpty()) { 
+  else
+  {
+    if (!actualSensorPairingCode.isEmpty())
+    {
       // An empty code means there was a communication problem. So we don't have a valid code, but maybe next read will succeed and we get one again.
       // But here we just got an non-empty pairing code that was different to the awaited one. So don't expect that will change in future until repairing was done.
       // -> invalidate pairing for security reasons
@@ -210,16 +254,17 @@ bool checkPairingValid() {
   }
 }
 
-
-bool initWifi() {
+bool initWifi()
+{
   // Connect to Wi-Fi
   WifiSettings wifiSettings = settingsManager.getWifiSettings();
   WiFi.mode(WIFI_STA);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  WiFi.setHostname(wifiSettings.hostname.c_str()); //define hostname
+  WiFi.setHostname(wifiSettings.hostname.c_str()); // define hostname
   WiFi.begin(wifiSettings.ssid.c_str(), wifiSettings.password.c_str());
   int counter = 0;
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED)
+  {
     delay(1000);
     Serial.println("Waiting for WiFi connection...");
     counter++;
@@ -234,7 +279,8 @@ bool initWifi() {
   return true;
 }
 
-void initWiFiAccessPointForConfiguration() {
+void initWiFiAccessPointForConfiguration()
+{
   WiFi.softAPConfig(WifiConfigIp, WifiConfigIp, IPAddress(255, 255, 255, 0));
   WiFi.softAP(WifiConfigSsid, WifiConfigPassword);
 
@@ -243,21 +289,22 @@ void initWiFiAccessPointForConfiguration() {
   dnsServer.start(DNS_PORT, "*", WifiConfigIp);
 
   Serial.print("AP IP address: ");
-  Serial.println(WifiConfigIp); 
+  Serial.println(WifiConfigIp);
 }
 
+void startWebserver()
+{
 
-void startWebserver(){
-  
   // Initialize SPIFFS
-  if(!SPIFFS.begin(true)){
+  if (!SPIFFS.begin(true))
+  {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
 
   // Init time by NTP Client
   configTime(gmtOffset_sec, daylightOffset_sec, settingsManager.getAppSettings().ntpServer.c_str());
-  
+
   // webserver for normal operating or wifi config?
   if (currentMode == Mode::wificonfig)
   {
@@ -265,11 +312,11 @@ void startWebserver(){
     // WiFi config mode
     // =================
 
-    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send(SPIFFS, "/wificonfig.html", String(), false, processor);
-    });
+    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+                 { request->send(SPIFFS, "/wificonfig.html", String(), false, processor); });
 
-    webServer.on("/save", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/save", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("hostname"))
       {
         Serial.println("Save wifi config");
@@ -283,51 +330,47 @@ void startWebserver(){
         settingsManager.saveWifiSettings(settings);
         shouldReboot = true;
       }
-      request->redirect("/");
-    });
+      request->redirect("/"); });
 
-
-    webServer.onNotFound([](AsyncWebServerRequest *request){
+    webServer.onNotFound([](AsyncWebServerRequest *request)
+                         {
       AsyncResponseStream *response = request->beginResponseStream("text/html");
       response->printf("<!DOCTYPE html><html><head><title>FingerprintDoorbell</title><meta http-equiv=\"refresh\" content=\"0; url=http://%s\" /></head><body>", WiFi.softAPIP().toString().c_str());
       response->printf("<p>Please configure your WiFi settings <a href='http://%s'>here</a> to connect FingerprintDoorbell to your home network.</p>", WiFi.softAPIP().toString().c_str());
       response->print("</body></html>");
-      request->send(response);
-    });
-
+      request->send(response); });
   }
   else
   {
     // =======================
     // normal operating mode
     // =======================
-    events.onConnect([](AsyncEventSourceClient *client){
+    events.onConnect([](AsyncEventSourceClient *client)
+                     {
       if(client->lastId()){
         Serial.printf("Client reconnected! Last message ID it got was: %u\n", client->lastId());
       }
       //send event with message "ready", id current millis
       // and set reconnect delay to 1 second
-      client->send(getLogMessagesAsHtml().c_str(),"message",millis(),1000);
-    });
+      client->send(getLogMessagesAsHtml().c_str(),"message",millis(),1000); });
     webServer.addHandler(&events);
 
-    
     // Route for root / web page
-    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send(SPIFFS, "/index.html", String(), false, processor);
-    });
+    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+                 { request->send(SPIFFS, "/index.html", String(), false, processor); });
 
-    webServer.on("/enroll", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/enroll", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("startEnrollment"))
       {
         enrollId = request->arg("newFingerprintId");
         enrollName = request->arg("newFingerprintName");
         currentMode = Mode::enroll;
       }
-      request->redirect("/");
-    });
+      request->redirect("/"); });
 
-    webServer.on("/editFingerprints", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/editFingerprints", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("selectedFingerprint"))
       {
         if(request->hasArg("btnDelete"))
@@ -344,10 +387,10 @@ void startWebserver(){
           fingerManager.renameFinger(id, newName);
         }
       }
-      request->redirect("/");  
-    });
+      request->redirect("/"); });
 
-    webServer.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("btnSaveSettings"))
       {
         Serial.println("Save settings");
@@ -362,11 +405,10 @@ void startWebserver(){
         shouldReboot = true;
       } else {
         request->send(SPIFFS, "/settings.html", String(), false, processor);
-      }
-    });
+      } });
 
-
-    webServer.on("/pairing", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/pairing", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("btnDoPairing"))
       {
         Serial.println("Do (re)pairing");
@@ -374,12 +416,10 @@ void startWebserver(){
         request->redirect("/");  
       } else {
         request->send(SPIFFS, "/settings.html", String(), false, processor);
-      }
-    });
+      } });
 
-
-
-    webServer.on("/factoryReset", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/factoryReset", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("btnFactoryReset"))
       {
         notifyClients("Factory reset initiated...");
@@ -397,11 +437,10 @@ void startWebserver(){
         shouldReboot = true;
       } else {
         request->send(SPIFFS, "/settings.html", String(), false, processor);
-      }
-    });
+      } });
 
-
-    webServer.on("/deleteAllFingerprints", HTTP_GET, [](AsyncWebServerRequest *request){
+    webServer.on("/deleteAllFingerprints", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
       if(request->hasArg("btnDeleteAllFingerprints"))
       {
         notifyClients("Deleting all fingerprints...");
@@ -413,199 +452,213 @@ void startWebserver(){
         
       } else {
         request->send(SPIFFS, "/settings.html", String(), false, processor);
-      }
-    });
+      } });
 
+    webServer.onNotFound([](AsyncWebServerRequest *request)
+                         { request->send(404); });
 
-    webServer.onNotFound([](AsyncWebServerRequest *request){
-      request->send(404);
-    });
-
-    
   } // end normal operating mode
 
-
   // common url callbacks
-  webServer.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request){
+  webServer.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request)
+               {
     request->redirect("/");
-    shouldReboot = true;
-  });
+    shouldReboot = true; });
 
-  webServer.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/bootstrap.min.css", "text/css");
-  });
-
+  webServer.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
+               { request->send(SPIFFS, "/bootstrap.min.css", "text/css"); });
 
   // Enable Over-the-air updates at http://<IPAddress>/update
   AsyncElegantOTA.begin(&webServer);
-  
+
   // Start server
   webServer.begin();
 
   notifyClients("System booted successfully!");
-
 }
 
-
-void mqttCallback(char* topic, byte* message, unsigned int length) {
+void mqttCallback(char *topic, byte *message, unsigned int length)
+{
   Serial.print("Message arrived on topic: ");
   Serial.print(topic);
   Serial.print(". Message: ");
   String messageTemp;
-  
-  for (int i = 0; i < length; i++) {
+
+  for (int i = 0; i < length; i++)
+  {
     Serial.print((char)message[i]);
     messageTemp += (char)message[i];
   }
   Serial.println();
 
   // Check incomming message for interesting topics
-  if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/ignoreTouchRing") {
-    if(messageTemp == "on"){
+  if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/ignoreTouchRing")
+  {
+    if (messageTemp == "on")
+    {
       fingerManager.setIgnoreTouchRing(true);
     }
-    else if(messageTemp == "off"){
+    else if (messageTemp == "off")
+    {
       fingerManager.setIgnoreTouchRing(false);
     }
   }
 
-  #ifdef CUSTOM_GPIOS
-    if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/customOutput1") {
-      if(messageTemp == "on"){
-        digitalWrite(customOutput1, HIGH); 
-      }
-      else if(messageTemp == "off"){
-        digitalWrite(customOutput1, LOW); 
-      }
+#ifdef CUSTOM_GPIOS
+  if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/customOutput1")
+  {
+    if (messageTemp == "on")
+    {
+      digitalWrite(customOutput1, HIGH);
     }
-    if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/customOutput2") {
-      if(messageTemp == "on"){
-        digitalWrite(customOutput2, HIGH); 
-      }
-      else if(messageTemp == "off"){
-        digitalWrite(customOutput2, LOW); 
-      }
+    else if (messageTemp == "off")
+    {
+      digitalWrite(customOutput1, LOW);
     }
-  #endif  
-
+  }
+  if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/customOutput2")
+  {
+    if (messageTemp == "on")
+    {
+      digitalWrite(customOutput2, HIGH);
+    }
+    else if (messageTemp == "off")
+    {
+      digitalWrite(customOutput2, LOW);
+    }
+  }
+#endif
 }
 
-void connectMqttClient() {
-  if (!mqttClient.connected() && mqttConfigValid) {
+void connectMqttClient()
+{
+  if (!mqttClient.connected() && mqttConfigValid)
+  {
     Serial.print("(Re)connect to MQTT broker...");
     // Attempt to connect
     bool connectResult;
-    
+
     // connect with or witout authentication
     String lastWillTopic = settingsManager.getAppSettings().mqttRootTopic + "/lastLogMessage";
     String lastWillMessage = "FingerprintDoorbell disconnected unexpectedly";
     if (settingsManager.getAppSettings().mqttUsername.isEmpty() || settingsManager.getAppSettings().mqttPassword.isEmpty())
-      connectResult = mqttClient.connect(settingsManager.getWifiSettings().hostname.c_str(),lastWillTopic.c_str(), 1, false, lastWillMessage.c_str());
+      connectResult = mqttClient.connect(settingsManager.getWifiSettings().hostname.c_str(), lastWillTopic.c_str(), 1, false, lastWillMessage.c_str());
     else
       connectResult = mqttClient.connect(settingsManager.getWifiSettings().hostname.c_str(), settingsManager.getAppSettings().mqttUsername.c_str(), settingsManager.getAppSettings().mqttPassword.c_str(), lastWillTopic.c_str(), 1, false, lastWillMessage.c_str());
 
-    if (connectResult) {
+    if (connectResult)
+    {
       // success
       Serial.println("connected");
       // Subscribe
       mqttClient.subscribe((settingsManager.getAppSettings().mqttRootTopic + "/ignoreTouchRing").c_str(), 1); // QoS = 1 (at least once)
-      #ifdef CUSTOM_GPIOS
-        mqttClient.subscribe((settingsManager.getAppSettings().mqttRootTopic + "/customOutput1").c_str(), 1); // QoS = 1 (at least once)
-        mqttClient.subscribe((settingsManager.getAppSettings().mqttRootTopic + "/customOutput2").c_str(), 1); // QoS = 1 (at least once)
-      #endif
-
-
-
-    } else {
-      if (mqttClient.state() == 4 || mqttClient.state() == 5) {
+#ifdef CUSTOM_GPIOS
+      mqttClient.subscribe((settingsManager.getAppSettings().mqttRootTopic + "/customOutput1").c_str(), 1); // QoS = 1 (at least once)
+      mqttClient.subscribe((settingsManager.getAppSettings().mqttRootTopic + "/customOutput2").c_str(), 1); // QoS = 1 (at least once)
+#endif
+    }
+    else
+    {
+      if (mqttClient.state() == 4 || mqttClient.state() == 5)
+      {
         mqttConfigValid = false;
         notifyClients("Failed to connect to MQTT Server: bad credentials or not authorized. Will not try again, please check your settings.");
-      } else {
+      }
+      else
+      {
         notifyClients(String("Failed to connect to MQTT Server, rc=") + mqttClient.state() + ", try again in 30 seconds");
       }
     }
   }
 }
 
-
 void doScan()
 {
   Match match = fingerManager.scanFingerprint();
   String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
-  switch(match.scanResult)
+  switch (match.scanResult)
   {
-    case ScanResult::noFinger:
-      // standard case, occurs every iteration when no finger touchs the sensor
-      if (match.scanResult != lastMatch.scanResult) {
-        Serial.println("no finger");
+  case ScanResult::noFinger:
+    // standard case, occurs every iteration when no finger touchs the sensor
+    if (match.scanResult != lastMatch.scanResult)
+    {
+      Serial.println("no finger");
+      mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
+      mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
+      mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
+      mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+    }
+    break;
+  case ScanResult::matchFound:
+    notifyClients(String("Match Found: ") + match.matchId + " - " + match.matchName + " with confidence of " + match.matchConfidence);
+    if (match.scanResult != lastMatch.scanResult)
+    {
+      if (checkPairingValid())
+      {
         mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
-        mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
-        mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
-        mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+        mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), String(match.matchId).c_str());
+        mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), match.matchName.c_str());
+        mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), String(match.matchConfidence).c_str());
+        Serial.println("MQTT message sent: Open the door!");
       }
-      break; 
-    case ScanResult::matchFound:
-      notifyClients( String("Match Found: ") + match.matchId + " - " + match.matchName  + " with confidence of " + match.matchConfidence );
-      if (match.scanResult != lastMatch.scanResult) {
-        if (checkPairingValid()) {
-          mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
-          mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), String(match.matchId).c_str());
-          mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), match.matchName.c_str());
-          mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), String(match.matchConfidence).c_str());
-          Serial.println("MQTT message sent: Open the door!");
-        } else {
-          notifyClients("Security issue! Match was not sent by MQTT because of invalid sensor pairing! This could potentially be an attack! If the sensor is new or has been replaced by you do a (re)pairing in settings page.");
-        }
+      else
+      {
+        notifyClients("Security issue! Match was not sent by MQTT because of invalid sensor pairing! This could potentially be an attack! If the sensor is new or has been replaced by you do a (re)pairing in settings page.");
       }
-      delay(3000); // wait some time before next scan to let the LED blink
-      break;
-    case ScanResult::noMatchFound:
-      notifyClients(String("No Match Found (Code ") + match.returnCode + ")");
-      if (match.scanResult != lastMatch.scanResult) {
-        digitalWrite(doorbellOutputPin, HIGH);
-        mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "on");
-        mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
-        mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
-        mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
-        Serial.println("MQTT message sent: ring the bell!");
-        delay(1000);
-        digitalWrite(doorbellOutputPin, LOW); 
-      } else {
-        delay(1000); // wait some time before next scan to let the LED blink
-      }
-      break;
-    case ScanResult::error:
-      notifyClients(String("ScanResult Error (Code ") + match.returnCode + ")");
-      break;
+    }
+    delay(3000); // wait some time before next scan to let the LED blink
+    break;
+  case ScanResult::noMatchFound:
+    notifyClients(String("No Match Found (Code ") + match.returnCode + ")");
+    if (match.scanResult != lastMatch.scanResult)
+    {
+      digitalWrite(doorbellOutputPin, HIGH);
+      mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "on");
+      mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
+      mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
+      mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+      Serial.println("MQTT message sent: ring the bell!");
+      delay(1000);
+      digitalWrite(doorbellOutputPin, LOW);
+    }
+    else
+    {
+      delay(1000); // wait some time before next scan to let the LED blink
+    }
+    break;
+  case ScanResult::error:
+    notifyClients(String("ScanResult Error (Code ") + match.returnCode + ")");
+    break;
   };
   lastMatch = match;
-
 }
 
 void doEnroll()
 {
   int id = enrollId.toInt();
-  if (id < 1 || id > 200) {
+  if (id < 1 || id > 200)
+  {
     notifyClients("Invalid memory slot id '" + enrollId + "'");
     return;
   }
 
   NewFinger finger = fingerManager.enrollFinger(id, enrollName);
-  if (finger.enrollResult == EnrollResult::ok) {
+  if (finger.enrollResult == EnrollResult::ok)
+  {
     notifyClients("Enrollment successfull. You can now use your new finger for scanning.");
     updateClientsFingerlist(fingerManager.getFingerListAsHtmlOptionList());
-  }  else if (finger.enrollResult == EnrollResult::error) {
+  }
+  else if (finger.enrollResult == EnrollResult::error)
+  {
     notifyClients(String("Enrollment failed. (Code ") + finger.returnCode + ")");
   }
 }
-
-
 
 void reboot()
 {
   notifyClients("System is rebooting now...");
   delay(1000);
-    
+
   mqttClient.disconnect();
   espClient.stop();
   dnsServer.stop();
@@ -614,28 +667,28 @@ void reboot()
   ESP.restart();
 }
 
-
 void setup()
 {
   // open serial monitor for debug infos
   Serial.begin(115200);
-  while (!Serial);  // For Yun/Leo/Micro/Zero/...
+  while (!Serial)
+    ; // For Yun/Leo/Micro/Zero/...
   delay(100);
 
   // initialize GPIOs
-  pinMode(doorbellOutputPin, OUTPUT); 
-  #ifdef CUSTOM_GPIOS
-    pinMode(customOutput1, OUTPUT); 
-    pinMode(customOutput2, OUTPUT); 
-    pinMode(customInput1, INPUT_PULLDOWN);
-    pinMode(customInput2, INPUT_PULLDOWN);
-  #endif  
+  pinMode(doorbellOutputPin, OUTPUT);
+#ifdef CUSTOM_GPIOS
+  pinMode(customOutput1, OUTPUT);
+  pinMode(customOutput2, OUTPUT);
+  pinMode(customInput1, INPUT_PULLDOWN);
+  pinMode(customInput2, INPUT_PULLDOWN);
+#endif
 
   settingsManager.loadWifiSettings();
   settingsManager.loadAppSettings();
 
   fingerManager.connect();
-  
+
   if (!checkPairingValid())
     notifyClients("Security issue! Pairing with sensor is invalid. This could potentially be an attack! If the sensor is new or has been replaced by you do a (re)pairing in settings page. MQTT messages regarding matching fingerprints will not been sent until pairing is valid again.");
 
@@ -647,27 +700,33 @@ void setup()
     fingerManager.setLedRingWifiConfig();
     initWiFiAccessPointForConfiguration();
     startWebserver();
-
-  } else {
+  }
+  else
+  {
     Serial.println("Started normal operating mode");
     currentMode = Mode::scan;
-    if (initWifi()) {
+    if (initWifi())
+    {
       startWebserver();
-      if (settingsManager.getAppSettings().mqttServer.isEmpty()) {
+      if (settingsManager.getAppSettings().mqttServer.isEmpty())
+      {
         mqttConfigValid = false;
         notifyClients("Error: No MQTT Broker is configured! Please go to settings and enter your server URL + user credentials.");
-      } else {
+      }
+      else
+      {
         delay(5000);
         IPAddress mqttServerIp;
         if (WiFi.hostByName(settingsManager.getAppSettings().mqttServer.c_str(), mqttServerIp))
         {
           mqttConfigValid = true;
           Serial.println("IP used for MQTT server: " + mqttServerIp.toString());
-          mqttClient.setServer(mqttServerIp , 1883);
+          mqttClient.setServer(mqttServerIp, 1883);
           mqttClient.setCallback(mqttCallback);
           connectMqttClient();
         }
-        else {
+        else
+        {
           mqttConfigValid = false;
           notifyClients("MQTT Server '" + settingsManager.getAppSettings().mqttServer + "' not found. Please check your settings.");
         }
@@ -676,28 +735,30 @@ void setup()
         fingerManager.setLedRingReady();
       else
         fingerManager.setLedRingError();
-    }  else {
+    }
+    else
+    {
       fingerManager.setLedRingError();
       shouldReboot = true;
     }
-
   }
-  
 }
 
 void loop()
 {
   // shouldReboot flag for supporting reboot through webui
-  if (shouldReboot) {
+  if (shouldReboot)
+  {
     reboot();
   }
-  
+
   // Reconnect handling
   if (currentMode != Mode::wificonfig)
   {
     unsigned long currentMillis = millis();
     // reconnect WiFi if down for 30s
-    if ((WiFi.status() != WL_CONNECTED) && (currentMillis - wifiReconnectPreviousMillis >= 30000ul)) {
+    if ((WiFi.status() != WL_CONNECTED) && (currentMillis - wifiReconnectPreviousMillis >= 30000ul))
+    {
       Serial.println("Reconnecting to WiFi...");
       WiFi.disconnect();
       WiFi.reconnect();
@@ -705,15 +766,16 @@ void loop()
     }
 
     // reconnect mqtt if down
-    if (!settingsManager.getAppSettings().mqttServer.isEmpty()) {
-      if (!mqttClient.connected() && (currentMillis - mqttReconnectPreviousMillis >= 30000ul)) {
+    if (!settingsManager.getAppSettings().mqttServer.isEmpty())
+    {
+      if (!mqttClient.connected() && (currentMillis - mqttReconnectPreviousMillis >= 30000ul))
+      {
         connectMqttClient();
         mqttReconnectPreviousMillis = currentMillis;
       }
       mqttClient.loop();
     }
   }
-
 
   // do the actual loop work
   switch (currentMode)
@@ -722,12 +784,12 @@ void loop()
     if (fingerManager.connected)
       doScan();
     break;
-  
+
   case Mode::enroll:
     doEnroll();
     currentMode = Mode::scan; // switch back to scan mode after enrollment is done
     break;
-  
+
   case Mode::wificonfig:
     dnsServer.processNextRequest(); // used for captive portal redirect
     break;
@@ -735,39 +797,38 @@ void loop()
   case Mode::maintenance:
     // do nothing, give webserver exclusive access to sensor (not thread-safe for concurrent calls)
     break;
-
   }
 
   // enter maintenance mode (no continous scanning) if requested
   if (needMaintenanceMode)
     currentMode = Mode::maintenance;
 
-  #ifdef CUSTOM_GPIOS
-    // read custom inputs and publish by MQTT
-    bool i1;
-    bool i2;
-    i1 = (digitalRead(customInput1) == HIGH);
-    i2 = (digitalRead(customInput2) == HIGH);
+#ifdef CUSTOM_GPIOS
+  // read custom inputs and publish by MQTT
+  bool i1;
+  bool i2;
+  i1 = (digitalRead(customInput1) == HIGH);
+  i2 = (digitalRead(customInput2) == HIGH);
 
-    String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
-    if (i1 != customInput1Value) {
-        if (i1)
-          mqttClient.publish((String(mqttRootTopic) + "/customInput1").c_str(), "on");      
-        else
-          mqttClient.publish((String(mqttRootTopic) + "/customInput1").c_str(), "off");      
-    }
+  String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
+  if (i1 != customInput1Value)
+  {
+    if (i1)
+      mqttClient.publish((String(mqttRootTopic) + "/customInput1").c_str(), "on");
+    else
+      mqttClient.publish((String(mqttRootTopic) + "/customInput1").c_str(), "off");
+  }
 
-    if (i2 != customInput2Value) {
-        if (i2)
-          mqttClient.publish((String(mqttRootTopic) + "/customInput2").c_str(), "on");      
-        else
-          mqttClient.publish((String(mqttRootTopic) + "/customInput2").c_str(), "off");  
-    }
+  if (i2 != customInput2Value)
+  {
+    if (i2)
+      mqttClient.publish((String(mqttRootTopic) + "/customInput2").c_str(), "on");
+    else
+      mqttClient.publish((String(mqttRootTopic) + "/customInput2").c_str(), "off");
+  }
 
-    customInput1Value = i1;
-    customInput2Value = i2;
+  customInput1Value = i1;
+  customInput2Value = i2;
 
-  #endif  
-
+#endif
 }
-
