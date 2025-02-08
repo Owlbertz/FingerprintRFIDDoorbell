@@ -2,6 +2,32 @@
   Main of FingerprintDoorbell
  ****************************************************/
 
+
+/***************************************************
+  Pin layout ESP32 R503 and RC522
+
+  Fingerprint R503
+  - Red: 3.3 V
+  - Black: GND
+  - Yellow (TXD, data output):  16
+  - Green/Purple (RDX, data input): 17
+  - Blue (wakeup): 5
+  - White (touch induction): 3.3V
+
+  RFID RC522: https://www.electronicwings.com/esp32/rfid-rc522-interfacing-with-esp32
+  - SDA: configurable, here: 4
+  - SCK: 18
+  - MOSI: 23
+  - MISO: 19
+  - IRQ: <unused>
+  - GND: GND
+  - RST: configurable, here: 0
+  - 3.3V: 3.3V
+
+ ****************************************************/
+
+
+
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <time.h>
@@ -12,6 +38,14 @@
 #include "FingerprintManager.h"
 #include "SettingsManager.h"
 #include "global.h"
+#include <RfidManager.h>
+
+// RFID stuff start
+#define RFID_RST_PIN 0 // Configurable, see typical pin layout above
+#define RFID_SS_PIN 4  // Configurable, see typical pin layout above
+
+RfidManager rfidManager;
+// RFID stuff end
 
 enum class Mode
 {
@@ -742,6 +776,10 @@ void setup()
       shouldReboot = true;
     }
   }
+
+  // RFID stuff start
+  rfidManager.init(RFID_SS_PIN, RFID_RST_PIN);
+  // RFID stuff end
 }
 
 void loop()
@@ -831,4 +869,30 @@ void loop()
   customInput2Value = i2;
 
 #endif
+
+  // RFID stuff start
+  if (rfidManager.isTokenPresent())
+  {
+    String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
+    if (rfidManager.isTokenValid())
+    {
+      String tokenName = rfidManager.getTokeName();
+      mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), tokenName.c_str());
+      fingerManager.setLedRingSuccess();
+      Serial.println("RFID access granted");
+    }
+    else
+    {
+      mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "on");
+      fingerManager.setLedRingError();
+      Serial.println("RFID access denied");
+    }
+
+    delay(1000);
+
+    mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), "");
+    mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "off");
+    fingerManager.setLedRingReady();
+  }
+  // RFID stuff end
 }
