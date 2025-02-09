@@ -2,7 +2,6 @@
   Main of FingerprintDoorbell
  ****************************************************/
 
-
 /***************************************************
   Pin layout ESP32 R503 and RC522
 
@@ -25,8 +24,6 @@
   - 3.3V: 3.3V
 
  ****************************************************/
-
-
 
 #include <WiFi.h>
 #include <DNSServer.h>
@@ -104,6 +101,40 @@ int value = 0;
 bool mqttConfigValid = true;
 
 Match lastMatch;
+
+unsigned long lastMqttSuccessPublish = 0;
+unsigned long lastMqttResetPublish = 0;
+unsigned int mqttMinPublishDelayInMs = 5 * 1000;
+
+enum class MqttPublishType
+{
+  success,
+  reset
+};
+
+bool isMqttFree(MqttPublishType eventType)
+{
+  unsigned long timePassedInMs = millis();
+
+  if (eventType == MqttPublishType::success)
+  {
+    if (timePassedInMs - lastMqttSuccessPublish >= mqttMinPublishDelayInMs)
+    {
+      lastMqttSuccessPublish = timePassedInMs;
+      return true;
+    }
+  }
+  else if (eventType == MqttPublishType::reset)
+  {
+    if (timePassedInMs - lastMqttResetPublish >= mqttMinPublishDelayInMs)
+    {
+      lastMqttResetPublish = timePassedInMs;
+      return true;
+    }
+  }
+
+  return false;
+}
 
 void addLogMessage(const String &message)
 {
@@ -617,10 +648,13 @@ void doScan()
     if (match.scanResult != lastMatch.scanResult)
     {
       Serial.println("no finger");
-      mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
-      mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
-      mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
-      mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+      if (isMqttFree(MqttPublishType::reset))
+      {
+        mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
+        mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
+        mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
+        mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+      }
     }
     break;
   case ScanResult::matchFound:
@@ -629,10 +663,13 @@ void doScan()
     {
       if (checkPairingValid())
       {
-        mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
-        mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), String(match.matchId).c_str());
-        mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), match.matchName.c_str());
-        mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), String(match.matchConfidence).c_str());
+        if (isMqttFree(MqttPublishType::success))
+        {
+          mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
+          mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), String(match.matchId).c_str());
+          mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), match.matchName.c_str());
+          mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), String(match.matchConfidence).c_str());
+        }
         Serial.println("MQTT message sent: Open the door!");
       }
       else
@@ -647,10 +684,13 @@ void doScan()
     if (match.scanResult != lastMatch.scanResult)
     {
       digitalWrite(doorbellOutputPin, HIGH);
-      mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "on");
-      mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
-      mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
-      mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+      if (isMqttFree(MqttPublishType::success))
+      {
+        mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "on");
+        mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
+        mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
+        mqttClient.publish((String(mqttRootTopic) + "/matchConfidence").c_str(), "-1");
+      }
       Serial.println("MQTT message sent: ring the bell!");
       delay(1000);
       digitalWrite(doorbellOutputPin, LOW);
@@ -877,21 +917,32 @@ void loop()
     if (rfidManager.isTokenValid())
     {
       String tokenName = rfidManager.getTokeName();
-      mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), tokenName.c_str());
+
+      if (isMqttFree(MqttPublishType::success))
+      {
+        mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), tokenName.c_str());
+      }
       fingerManager.setLedRingSuccess();
       Serial.println("RFID access granted");
     }
     else
     {
-      mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "on");
+
+      if (isMqttFree(MqttPublishType::success))
+      {
+        mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "on");
+      }
       fingerManager.setLedRingError();
       Serial.println("RFID access denied");
     }
 
     delay(1000);
 
-    mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), "");
-    mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "off");
+    if (isMqttFree(MqttPublishType::reset))
+    {
+      mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), "");
+      mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "off");
+    }
     fingerManager.setLedRingReady();
   }
   // RFID stuff end
