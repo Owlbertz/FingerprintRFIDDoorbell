@@ -5,14 +5,12 @@
 
 class RfidManager
 {
-private:
-  String getTokenUid();
-
 public:
   void init(byte pinSda, byte pinReset);
   bool isTokenValid();
   bool isTokenPresent();
   String getTokeName();
+  String getTokenUid();
 };
 
 #endif

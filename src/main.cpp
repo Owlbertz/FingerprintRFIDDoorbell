@@ -104,7 +104,8 @@ Match lastMatch;
 
 unsigned long lastMqttSuccessPublish = 0;
 unsigned long lastMqttResetPublish = 0;
-unsigned int mqttMinPublishDelayInMs = 5 * 1000;
+unsigned int defaultMqttMinPublishDelayInMs = 1 * 1000;
+unsigned int mqttMinPublishDelayInMs = defaultMqttMinPublishDelayInMs;
 
 enum class MqttPublishType
 {
@@ -238,6 +239,10 @@ String processor(const String &var)
   {
     return settingsManager.getAppSettings().ntpServer;
   }
+  else if (var == "EVENT_DELAY")
+  {
+    return String(settingsManager.getAppSettings().eventDelay);
+  }
 
   return String();
 }
@@ -364,6 +369,15 @@ void startWebserver()
   if (!SPIFFS.begin(true))
   {
     Serial.println("An Error has occurred while mounting SPIFFS");
+
+    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+      AsyncResponseStream *response = request->beginResponseStream("text/html");
+      response->printf("<!DOCTYPE html><html><head><title>FingerprintDoorbell</title></head><body>");
+      response->printf("<p>Info mode.</p>");
+      response->print("</body></html>");
+      request->send(response); });
+
     return;
   }
 
@@ -420,6 +434,18 @@ void startWebserver()
       client->send(getLogMessagesAsHtml().c_str(),"message",millis(),1000); });
     webServer.addHandler(&events);
 
+    webServer.on("/info", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+      AsyncResponseStream *response = request->beginResponseStream("text/html");
+      response->printf("<!DOCTYPE html><html><head><title>FingerprintDoorbell</title></head><body>");
+      // response->printf("<p>Info mode %s / %s.</p>", String(SPIFFS.usedBytes()), String(SPIFFS.totalBytes()));
+      response->printf("<p>Info mode</p>");
+      response->print("</body></html>");
+      request->send(response); });
+
+    // attach filesystem root at URL /fs
+    webServer.serveStatic("/fs", SPIFFS, "/");
+
     // Route for root / web page
     webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
                  { request->send(SPIFFS, "/index.html", String(), false, processor); });
@@ -465,6 +491,7 @@ void startWebserver()
         settings.mqttPassword = request->arg("mqtt_password");
         settings.mqttRootTopic = request->arg("mqtt_rootTopic");
         settings.ntpServer = request->arg("ntpServer");
+        settings.eventDelay = request->arg("eventDelay").toInt();
         settingsManager.saveAppSettings(settings);
         request->redirect("/");  
         shouldReboot = true;
@@ -611,6 +638,14 @@ void connectMqttClient()
     else
       connectResult = mqttClient.connect(settingsManager.getWifiSettings().hostname.c_str(), settingsManager.getAppSettings().mqttUsername.c_str(), settingsManager.getAppSettings().mqttPassword.c_str(), lastWillTopic.c_str(), 1, false, lastWillMessage.c_str());
 
+    if (settingsManager.getAppSettings().eventDelay == 0 || settingsManager.getAppSettings().eventDelay < 100 || settingsManager.getAppSettings().eventDelay > 10000)
+    {
+      mqttMinPublishDelayInMs = defaultMqttMinPublishDelayInMs;
+    }
+    else
+    {
+      mqttMinPublishDelayInMs = settingsManager.getAppSettings().eventDelay;
+    }
     if (connectResult)
     {
       // success
@@ -923,25 +958,23 @@ void loop()
         mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), tokenName.c_str());
       }
       fingerManager.setLedRingSuccess();
-      Serial.println("RFID access granted");
+      Serial.println("RFID detected known token: " + tokenName);
     }
-    else
-    {
 
-      if (isMqttFree(MqttPublishType::success))
-      {
-        mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "on");
-      }
-      fingerManager.setLedRingError();
-      Serial.println("RFID access denied");
+    String tokenUid = rfidManager.getTokenUid();
+    if (isMqttFree(MqttPublishType::success))
+    {
+      mqttClient.publish((String(mqttRootTopic) + "/rfidTokenUid").c_str(), tokenUid.c_str());
     }
+    fingerManager.setLedRingError();
+    Serial.println("RFID detected token with uid: " + tokenUid);
 
     delay(1000);
 
     if (isMqttFree(MqttPublishType::reset))
     {
       mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), "");
-      mqttClient.publish((String(mqttRootTopic) + "/rfidInvalidToken").c_str(), "off");
+      mqttClient.publish((String(mqttRootTopic) + "/rfidTokenUid").c_str(), "");
     }
     fingerManager.setLedRingReady();
   }
