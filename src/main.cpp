@@ -29,7 +29,7 @@
 #include <DNSServer.h>
 #include <time.h>
 #include <ESPAsyncWebServer.h>
-#include <AsyncElegantOTA.h>
+#include <ElegantOTA.h>
 #include <SPIFFS.h>
 #include <PubSubClient.h>
 #include "FingerprintManager.h"
@@ -52,7 +52,7 @@ enum class Mode
   maintenance
 };
 
-const char *VersionInfo = "0.4";
+const char *VersionInfo = "0.5";
 
 // ===================================================================================================================
 // Caution: below are not the credentials for connecting to your home network, they are for the Access Point mode!!!
@@ -79,6 +79,9 @@ String logMessages[logMessagesCount]; // log messages, 0=most recent log message
 bool shouldReboot = false;
 unsigned long wifiReconnectPreviousMillis = 0;
 unsigned long mqttReconnectPreviousMillis = 0;
+bool fileSystemOk = false;
+bool fingerPrintSensorOk = false;
+bool ntpServerOk = false;
 
 String enrollId;
 String enrollName;
@@ -92,6 +95,10 @@ const byte DNS_PORT = 53;
 DNSServer dnsServer;
 AsyncWebServer webServer(80);       // AsyncWebServer  on port 80
 AsyncEventSource events("/events"); // event source (Server-Sent events)
+
+IPAddress primaryDnsIp = INADDR_NONE;
+IPAddress secondaryDnsIp = INADDR_NONE;
+IPAddress mqttServerIp = INADDR_NONE;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -162,13 +169,38 @@ String getTimestampString()
   if (!getLocalTime(&timeinfo))
   {
     Serial.println("Failed to obtain time");
-    return "no time";
+    // return "no time";
+    return String(trunc(millis() / 1000));
   }
 
   char buffer[25];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
   String datetime = String(buffer);
   return datetime;
+}
+
+void setTimezone(String timezone)
+{
+  Serial.printf("Setting Timezone to %s\n", timezone.c_str());
+  setenv("TZ", timezone.c_str(), 1); //  Now adjust the TZ.  Clock settings are adjusted to show the new local time
+  tzset();
+}
+
+void initTime(String timezone)
+{
+  struct tm timeinfo;
+  Serial.println("Setting up time using NTP: " + settingsManager.getAppSettings().ntpServer + " and TZ: " + timezone);
+
+  configTime(0, 0, settingsManager.getAppSettings().ntpServer.c_str(), "2.europe.pool.ntp.org", "pool.ntp.org"); // First connect to NTP server, with 0 TZ offset
+  if (!getLocalTime(&timeinfo, 10000))
+  {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+  ntpServerOk = true;
+  Serial.println("Got the time from NTP");
+  // Now we can set the real timezone
+  setTimezone(timezone);
 }
 
 /* wait for maintenance mode or timeout 5s */
@@ -243,6 +275,14 @@ String processor(const String &var)
   {
     return String(settingsManager.getAppSettings().eventDelay);
   }
+  else if (var == "PRIMARY_DNS_SERVER")
+  {
+    return settingsManager.getAppSettings().primaryDnsServer;
+  }
+  else if (var == "SECONDARY_DNS_SERVER")
+  {
+    return settingsManager.getAppSettings().secondaryDnsServer;
+  }
 
   return String();
 }
@@ -304,8 +344,8 @@ bool checkPairingValid()
   }
 
   String actualSensorPairingCode = fingerManager.getPairingCode();
-  // Serial.println("Awaited pairing code: " + settings.sensorPairingCode);
-  // Serial.println("Actual pairing code: " + actualSensorPairingCode);
+  Serial.println("Awaited pairing code: " + settings.sensorPairingCode);
+  Serial.println("Actual pairing code: " + actualSensorPairingCode);
 
   if (actualSensorPairingCode.equals(settings.sensorPairingCode))
     return true;
@@ -328,8 +368,29 @@ bool initWifi()
 {
   // Connect to Wi-Fi
   WifiSettings wifiSettings = settingsManager.getWifiSettings();
+
+  if (!settingsManager.getAppSettings().primaryDnsServer.isEmpty())
+  {
+    Serial.println("Using primary DNS server address: " + settingsManager.getAppSettings().primaryDnsServer);
+    if (1 != WiFi.hostByName(settingsManager.getAppSettings().primaryDnsServer.c_str(), primaryDnsIp))
+    {
+      primaryDnsIp = INADDR_NONE;
+      Serial.println("Invalid primary DNS server address");
+    }
+  }
+
+  if (!settingsManager.getAppSettings().secondaryDnsServer.isEmpty())
+  {
+    Serial.println("Using secondary DNS server address: " + settingsManager.getAppSettings().secondaryDnsServer);
+    if (1 != WiFi.hostByName(settingsManager.getAppSettings().secondaryDnsServer.c_str(), secondaryDnsIp))
+    {
+      secondaryDnsIp = INADDR_NONE;
+      Serial.println("Invalid secondary DNS server address");
+    }
+  }
+
   WiFi.mode(WIFI_STA);
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
+  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, primaryDnsIp, secondaryDnsIp);
   WiFi.setHostname(wifiSettings.hostname.c_str()); // define hostname
   WiFi.begin(wifiSettings.ssid.c_str(), wifiSettings.password.c_str());
   int counter = 0;
@@ -366,23 +427,24 @@ void startWebserver()
 {
 
   // Initialize SPIFFS
-  if (!SPIFFS.begin(true))
+  fileSystemOk = SPIFFS.begin();
+  if (!fileSystemOk)
   {
     Serial.println("An Error has occurred while mounting SPIFFS");
 
-    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-                 {
-      AsyncResponseStream *response = request->beginResponseStream("text/html");
-      response->printf("<!DOCTYPE html><html><head><title>FingerprintDoorbell</title></head><body>");
-      response->printf("<p>Info mode.</p>");
-      response->print("</body></html>");
-      request->send(response); });
+    // webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+    //              {
+    //   AsyncResponseStream *response = request->beginResponseStream("text/html");
+    //   response->printf("<!DOCTYPE html><html><head><title>FingerprintDoorbell</title></head><body>");
+    //   response->printf("<p>Info mode.</p>");
+    //   response->print("</body></html>");
+    //   request->send(response); });
 
-    return;
+    // return;
   }
 
   // Init time by NTP Client
-  configTime(gmtOffset_sec, daylightOffset_sec, settingsManager.getAppSettings().ntpServer.c_str());
+  // configTime(gmtOffset_sec, daylightOffset_sec, settingsManager.getAppSettings().ntpServer.c_str());
 
   // webserver for normal operating or wifi config?
   if (currentMode == Mode::wificonfig)
@@ -421,6 +483,7 @@ void startWebserver()
   }
   else
   {
+
     // =======================
     // normal operating mode
     // =======================
@@ -436,11 +499,34 @@ void startWebserver()
 
     webServer.on("/info", HTTP_GET, [](AsyncWebServerRequest *request)
                  {
-      AsyncResponseStream *response = request->beginResponseStream("text/html");
-      response->printf("<!DOCTYPE html><html><head><title>FingerprintDoorbell</title></head><body>");
-      // response->printf("<p>Info mode %s / %s.</p>", String(SPIFFS.usedBytes()), String(SPIFFS.totalBytes()));
-      response->printf("<p>Info mode</p>");
-      response->print("</body></html>");
+      Serial.println("Received /info request");
+      AsyncResponseStream *response = request->beginResponseStream("application/json");
+      response->printf("{");
+      response->printf("\"version\": \"%s\",", VersionInfo);
+      response->printf("\"gateway\": \"%s\",", WiFi.gatewayIP().toString().c_str());
+      response->printf("\"dns\": \"%s\",", WiFi.dnsIP().toString().c_str());
+      response->printf("\"ip\": \"%s\",", WiFi.localIP().toString().c_str());
+      response->printf("\"primaryDns\": \"%s\",", settingsManager.getAppSettings().primaryDnsServer.c_str());
+      response->printf("\"secondaryDns\": \"%s\",", settingsManager.getAppSettings().secondaryDnsServer.c_str());
+      response->printf("\"ntpServer\": \"%s\",", settingsManager.getAppSettings().ntpServer.c_str());
+      response->printf("\"ntpServerOk\": %s,", ntpServerOk ? "true" : "false");
+      response->printf("\"sensorPairingValid\": %s,", settingsManager.getAppSettings().sensorPairingValid ? "true" : "false");
+      response->printf("\"fingerprints\": %s,", fingerManager.getFingerListAsJsonArray().c_str());
+      // response->printf("\"sensorPairingCode\": \"%s\",", settingsManager.getAppSettings().sensorPairingCode.c_str());
+      // response->printf("\"actualSensorPairingCode\": \"%s\",", fingerManager.getPairingCode().c_str());
+      response->printf("\"mqttBroker\": \"%s\",", settingsManager.getAppSettings().mqttServer.c_str());
+      response->printf("\"mqttConnected\": %s,", mqttClient.connected() ? "true" : "false");
+      response->printf("\"eventDelay\": %d,", mqttMinPublishDelayInMs);
+      response->printf("\"fileSystemOk\": %s,", fileSystemOk ? "true" : "false");
+      try
+      {
+        response->printf("\"fs\": \"%f/%f\"", SPIFFS.usedBytes(), SPIFFS.totalBytes());
+      }
+      catch (int myNum)
+      {
+        response->printf("\"fs\":\"%s\"", "error");
+      }
+      response->printf("}");
       request->send(response); });
 
     // attach filesystem root at URL /fs
@@ -491,6 +577,8 @@ void startWebserver()
         settings.mqttPassword = request->arg("mqtt_password");
         settings.mqttRootTopic = request->arg("mqtt_rootTopic");
         settings.ntpServer = request->arg("ntpServer");
+        settings.primaryDnsServer = request->arg("primaryDnsServer");
+        settings.secondaryDnsServer = request->arg("secondaryDnsServer");
         settings.eventDelay = request->arg("eventDelay").toInt();
         settingsManager.saveAppSettings(settings);
         request->redirect("/");  
@@ -504,8 +592,13 @@ void startWebserver()
       if(request->hasArg("btnDoPairing"))
       {
         Serial.println("Do (re)pairing");
-        doPairing();
-        request->redirect("/");  
+        AsyncResponseStream *response = request->beginResponseStream("text/html");
+        if (doPairing()) {
+          response->printf("Pairing successfull");
+        } else {
+          response->printf("Pairing failed");
+        }
+        request->send(response);
       } else {
         request->send(SPIFFS, "/settings.html", String(), false, processor);
       } });
@@ -554,14 +647,17 @@ void startWebserver()
   // common url callbacks
   webServer.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request)
                {
-    request->redirect("/");
-    shouldReboot = true; });
+      AsyncResponseStream *response = request->beginResponseStream("text/html");
+      response->printf("Rebooting...");
+      request->send(response);
+      delay(3000);
+      shouldReboot = true; });
 
-  webServer.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
-               { request->send(SPIFFS, "/bootstrap.min.css", "text/css"); });
+  // webServer.on("/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
+  //              { request->send(SPIFFS, "/bootstrap.min.css", "text/css"); });
 
   // Enable Over-the-air updates at http://<IPAddress>/update
-  AsyncElegantOTA.begin(&webServer);
+  ElegantOTA.begin(&webServer);
 
   // Start server
   webServer.begin();
@@ -646,6 +742,7 @@ void connectMqttClient()
     {
       mqttMinPublishDelayInMs = settingsManager.getAppSettings().eventDelay;
     }
+    Serial.println("MQTT Min Publish Delay: " + String(mqttMinPublishDelayInMs));
     if (connectResult)
     {
       // success
@@ -718,7 +815,7 @@ void doScan()
     notifyClients(String("No Match Found (Code ") + match.returnCode + ")");
     if (match.scanResult != lastMatch.scanResult)
     {
-      digitalWrite(doorbellOutputPin, HIGH);
+      // digitalWrite(doorbellOutputPin, HIGH);
       if (isMqttFree(MqttPublishType::success))
       {
         mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "on");
@@ -728,7 +825,7 @@ void doScan()
       }
       Serial.println("MQTT message sent: ring the bell!");
       delay(1000);
-      digitalWrite(doorbellOutputPin, LOW);
+      // digitalWrite(doorbellOutputPin, LOW);
     }
     else
     {
@@ -799,8 +896,13 @@ void setup()
   fingerManager.connect();
 
   if (!checkPairingValid())
+  {
     notifyClients("Security issue! Pairing with sensor is invalid. This could potentially be an attack! If the sensor is new or has been replaced by you do a (re)pairing in settings page. MQTT messages regarding matching fingerprints will not been sent until pairing is valid again.");
-
+  }
+  else
+  {
+    fingerPrintSensorOk = true;
+  }
   if (fingerManager.isFingerOnSensor() || !settingsManager.isWifiConfigured())
   {
     // ring touched during startup or no wifi settings stored -> wifi config mode
@@ -816,6 +918,8 @@ void setup()
     currentMode = Mode::scan;
     if (initWifi())
     {
+
+      initTime("CET-1CEST,M3.5.0,M10.5.0/3");
       startWebserver();
       if (settingsManager.getAppSettings().mqttServer.isEmpty())
       {
@@ -825,7 +929,6 @@ void setup()
       else
       {
         delay(5000);
-        IPAddress mqttServerIp;
         if (WiFi.hostByName(settingsManager.getAppSettings().mqttServer.c_str(), mqttServerIp))
         {
           mqttConfigValid = true;
@@ -864,6 +967,8 @@ void loop()
   {
     reboot();
   }
+
+  ElegantOTA.loop();
 
   // Reconnect handling
   if (currentMode != Mode::wificonfig)
@@ -949,27 +1054,26 @@ void loop()
   if (rfidManager.isTokenPresent())
   {
     String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
-    if (rfidManager.isTokenValid())
-    {
-      String tokenName = rfidManager.getTokeName();
+    // if (rfidManager.isTokenValid())
+    // {
+    //   String tokenName = rfidManager.getTokenName();
 
-      if (isMqttFree(MqttPublishType::success))
-      {
-        mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), tokenName.c_str());
-      }
-      fingerManager.setLedRingSuccess();
-      Serial.println("RFID detected known token: " + tokenName);
-    }
+    //   if (isMqttFree(MqttPublishType::success))
+    //   {
+    //     mqttClient.publish((String(mqttRootTopic) + "/rfidTokenName").c_str(), tokenName.c_str());
+    //   }
+    //   fingerManager.setLedRingSuccess();
+    //   Serial.println("RFID detected known token: " + tokenName);
+    // }
 
     String tokenUid = rfidManager.getTokenUid();
+    fingerManager.setLedRingSuccess();
+    Serial.println("RFID detected token with uid: " + tokenUid);
     if (isMqttFree(MqttPublishType::success))
     {
       mqttClient.publish((String(mqttRootTopic) + "/rfidTokenUid").c_str(), tokenUid.c_str());
+      delay(1000);
     }
-    fingerManager.setLedRingError();
-    Serial.println("RFID detected token with uid: " + tokenUid);
-
-    delay(1000);
 
     if (isMqttFree(MqttPublishType::reset))
     {

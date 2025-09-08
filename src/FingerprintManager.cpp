@@ -72,7 +72,7 @@ void FingerprintManager::updateTouchState(bool touched)
     if (touched)
     {
       // turn touch indicator on:
-      finger.LEDcontrol(FINGERPRINT_LED_FLASHING, 25, FINGERPRINT_LED_RED, 0);
+      finger.LEDcontrol(FINGERPRINT_LED_FLASHING, 25, FINGERPRINT_LED_BLUE, 5);
     }
     else
     {
@@ -472,6 +472,22 @@ String FingerprintManager::getFingerListAsHtmlOptionList()
   return htmlOptions;
 }
 
+String FingerprintManager::getFingerListAsJsonArray()
+{
+  String result = "[";
+  for (int i = 1; i <= 200; i++)
+  {
+    if (fingerList[i].compareTo("@empty") != 0)
+    {
+      if (i > 1)
+        result += ",";
+      result += "{\"id\":" + String(i) + ",\"name\":\"" + fingerList[i] + "\"}";
+    }
+  }
+  result += "]";
+  return result;
+}
+
 void FingerprintManager::setIgnoreTouchRing(bool state)
 {
   if (ignoreTouchRing != state)
@@ -519,7 +535,8 @@ void FingerprintManager::setLedRingWifiConfig()
 void FingerprintManager::setLedRingReady()
 {
   if (!ignoreTouchRing)
-    finger.LEDcontrol(FINGERPRINT_LED_BREATHING, 250, FINGERPRINT_LED_BLUE);
+    // finger.LEDcontrol(FINGERPRINT_LED_BREATHING, 250, FINGERPRINT_LED_BLUE);
+    finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_BLUE);
   else
     finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_BLUE); // just an indicator for me to see if touch ring is active or not
 }

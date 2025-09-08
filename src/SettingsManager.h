@@ -20,6 +20,8 @@ struct AppSettings
   String ntpServer = "pool.ntp.org";
   String sensorPin = "00000000";
   int eventDelay = 1000;
+  String primaryDnsServer = "";
+  String secondaryDnsServer = "";
   String sensorPairingCode = "";
   bool sensorPairingValid = false;
 };

@@ -69,6 +69,7 @@ public:
   void deleteFinger(int id);
   void renameFinger(int id, String newName);
   String getFingerListAsHtmlOptionList();
+  String getFingerListAsJsonArray();
   void setIgnoreTouchRing(bool state);
   bool isFingerOnSensor();
   void setLedRingError();

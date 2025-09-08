@@ -56,7 +56,7 @@ bool RfidManager::isTokenValid()
   return false;
 }
 
-String RfidManager::getTokeName()
+String RfidManager::getTokenName()
 {
   if (!isInitialized)
   {

@@ -102,6 +102,30 @@
 	</div>
 
 	<div class="form-group">
+		<label class="col-md-4 control-label" for="eventDelay">Min Event Delay</label>  
+		<div class="col-md-4">
+		<input id="eventDelay" name="eventDelay" min="100" max="10000" type="number" placeholder="Min Event Delay" class="form-control input-md" value="%EVENT_DELAY%">
+		<small class="text-muted">Minimum time in ms to wait between publishing MQTT events.</small>		
+		</div>
+	</div>
+
+	<div class="form-group">
+		<label class="col-md-4 control-label" for="primaryDnsServer">Primary DNS Server</label>  
+		<div class="col-md-4">
+		<input id="primaryDnsServer" name="primaryDnsServer" type="text" placeholder="Primary DNS Server" class="form-control input-md" value="%PRIMARY_DNS_SERVER%">
+		<small class="text-muted">Primary DNS server IP.</small>		
+		</div>
+	</div>
+
+	<div class="form-group">
+		<label class="col-md-4 control-label" for="secondaryDnsServer">Secondary DNS Server</label>  
+		<div class="col-md-4">
+		<input id="secondaryDnsServer" name="secondaryDnsServer" type="text" placeholder="Secondary DNS Server" class="form-control input-md" value="%SECONDARY_DNS_SERVER%">
+		<small class="text-muted">Secondary DNS server IP.</small>		
+		</div>
+	</div>
+
+	<div class="form-group">
 		<label class="col-md-4 control-label" for="ntpServer">NTP Server</label>  
 		<div class="col-md-4">
 		<input id="ntpServer" name="ntpServer" type="text" placeholder="URL to NTP server" class="form-control input-md" value="%NTP_SERVER%">

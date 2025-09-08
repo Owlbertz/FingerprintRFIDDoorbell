@@ -9,7 +9,7 @@ public:
   void init(byte pinSda, byte pinReset);
   bool isTokenValid();
   bool isTokenPresent();
-  String getTokeName();
+  String getTokenName();
   String getTokenUid();
 };
 
