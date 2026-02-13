@@ -74,6 +74,7 @@ public:
   void setLedRingError();
   void setLedRingWifiConfig();
   void setLedRingReady();
+  void setLedRingBell();
   String getPairingCode();
   bool setPairingCode(String pairingCode);
 

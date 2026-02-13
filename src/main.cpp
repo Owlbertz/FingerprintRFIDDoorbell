@@ -165,7 +165,7 @@ String getTimestampString()
     return "no time";
   }
 
-  char buffer[25];
+  char buffer[30];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S %Z", &timeinfo);
   String datetime = String(buffer);
   return datetime;
@@ -383,6 +383,10 @@ void startWebserver()
 
   // Init time by NTP Client
   configTime(gmtOffset_sec, daylightOffset_sec, settingsManager.getAppSettings().ntpServer.c_str());
+  // notifyClients(settingsManager.getAppSettings().ntpServer.c_str());
+  // setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+  // Core 2.6.0+
+  // configTime("CET-1CEST,M3.5.0,M10.5.0/3", settingsManager.getAppSettings().ntpServer.c_str());  // Zeitzone einstellen https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
 
   // webserver for normal operating or wifi config?
   if (currentMode == Mode::wificonfig)
@@ -583,17 +587,25 @@ void mqttCallback(char *topic, byte *message, unsigned int length)
   }
   Serial.println();
 
+  // notifyClients("Received MQTT command " + messageTemp + " for topic " + String(topic));
+
   // Check incomming message for interesting topics
-  if (String(topic) == String(settingsManager.getAppSettings().mqttRootTopic) + "/ignoreTouchRing")
+  if (String(topic).equals(String(settingsManager.getAppSettings().mqttRootTopic) + "/ignoreTouchRing"))
   {
-    if (messageTemp == "on")
+    if (messageTemp.equals(String("on")))
     {
+      notifyClients("Turning ignoreTouchRing to true");
       fingerManager.setIgnoreTouchRing(true);
     }
-    else if (messageTemp == "off")
+    else if (messageTemp.equals(String("off")))
     {
+      notifyClients("Turning ignoreTouchRing to false");
       fingerManager.setIgnoreTouchRing(false);
+    } else {
+      notifyClients("Invalid ignoreTouchRing command - expect on or off, received " + messageTemp);
     }
+  } else {
+    notifyClients("Invalid topic - expected ignoreTouchRing, received " + String(topic));
   }
 
 #ifdef CUSTOM_GPIOS
@@ -621,6 +633,8 @@ void mqttCallback(char *topic, byte *message, unsigned int length)
   }
 #endif
 }
+
+bool lastConnectFailed = true;
 
 void connectMqttClient()
 {
@@ -650,6 +664,10 @@ void connectMqttClient()
     {
       // success
       Serial.println("connected");
+      if (lastConnectFailed) {
+        notifyClients(String("Successfully connected to MQTT Server"));
+      }
+      lastConnectFailed = false;
       // Subscribe
       mqttClient.subscribe((settingsManager.getAppSettings().mqttRootTopic + "/ignoreTouchRing").c_str(), 1); // QoS = 1 (at least once)
 #ifdef CUSTOM_GPIOS
@@ -659,6 +677,7 @@ void connectMqttClient()
     }
     else
     {
+      lastConnectFailed = true;
       if (mqttClient.state() == 4 || mqttClient.state() == 5)
       {
         mqttConfigValid = false;
@@ -685,6 +704,7 @@ void doScan()
       Serial.println("no finger");
       if (isMqttFree(MqttPublishType::reset))
       {
+        // mqttClient.publish((String(mqttRootTopic) + "/error").c_str(), "");
         mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
         mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
         mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
@@ -698,8 +718,10 @@ void doScan()
     {
       if (checkPairingValid())
       {
+        fingerManager.setLedRingSuccess();
         if (isMqttFree(MqttPublishType::success))
         {
+          mqttClient.publish((String(mqttRootTopic) + "/error").c_str(), "");
           mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "off");
           mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), String(match.matchId).c_str());
           mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), match.matchName.c_str());
@@ -709,18 +731,25 @@ void doScan()
       }
       else
       {
+        fingerManager.setLedRingError();
+        if (isMqttFree(MqttPublishType::success))
+        {
+          mqttClient.publish((String(mqttRootTopic) + "/error").c_str(), "invalid_pairing");
+        }
         notifyClients("Security issue! Match was not sent by MQTT because of invalid sensor pairing! This could potentially be an attack! If the sensor is new or has been replaced by you do a (re)pairing in settings page.");
       }
     }
-    delay(3000); // wait some time before next scan to let the LED blink
+    delay(1000); // wait some time before next scan to let the LED blink
     break;
   case ScanResult::noMatchFound:
     notifyClients(String("No Match Found (Code ") + match.returnCode + ")");
     if (match.scanResult != lastMatch.scanResult)
     {
       digitalWrite(doorbellOutputPin, HIGH);
+      fingerManager.setLedRingBell();
       if (isMqttFree(MqttPublishType::success))
       {
+        mqttClient.publish((String(mqttRootTopic) + "/error").c_str(), "");
         mqttClient.publish((String(mqttRootTopic) + "/ring").c_str(), "on");
         mqttClient.publish((String(mqttRootTopic) + "/matchId").c_str(), "-1");
         mqttClient.publish((String(mqttRootTopic) + "/matchName").c_str(), "");
@@ -737,6 +766,7 @@ void doScan()
     break;
   case ScanResult::error:
     notifyClients(String("ScanResult Error (Code ") + match.returnCode + ")");
+    mqttClient.publish((String(mqttRootTopic) + "/error").c_str(), String("scan_error_" + match.returnCode).c_str());
     break;
   };
   lastMatch = match;
@@ -798,8 +828,15 @@ void setup()
 
   fingerManager.connect();
 
-  if (!checkPairingValid())
+  if (!checkPairingValid()) {
+    String mqttRootTopic = settingsManager.getAppSettings().mqttRootTopic;
+    
+    if (isMqttFree(MqttPublishType::success))
+    {
+      mqttClient.publish((String(mqttRootTopic) + "/error").c_str(), "invalid_pairing");
+    }
     notifyClients("Security issue! Pairing with sensor is invalid. This could potentially be an attack! If the sensor is new or has been replaced by you do a (re)pairing in settings page. MQTT messages regarding matching fingerprints will not been sent until pairing is valid again.");
+  }
 
   if (fingerManager.isFingerOnSensor() || !settingsManager.isWifiConfigured())
   {
@@ -966,7 +1003,7 @@ void loop()
     {
       mqttClient.publish((String(mqttRootTopic) + "/rfidTokenUid").c_str(), tokenUid.c_str());
     }
-    fingerManager.setLedRingError();
+    // fingerManager.setLedRingError();
     Serial.println("RFID detected token with uid: " + tokenUid);
 
     delay(1000);

@@ -116,6 +116,8 @@ Match FingerprintManager::scanFingerprint()
 
   bool doAnotherScan = true;
   int scanPass = 0;
+  int maxScanPasses = 10;
+  int maxScanPassesNoFinger = 15;
   while (doAnotherScan)
   {
     doAnotherScan = false;
@@ -148,7 +150,7 @@ Match FingerprintManager::scanFingerprint()
           // no finger on sensor but ring was touched -> ring event
           // Serial.println("ring touched");
           updateTouchState(true);
-          if (imagingPass < 15) // up to x image passes in a row are taken after touch ring was touched until noFinger will raise a noMatchFound event
+          if (imagingPass < maxScanPassesNoFinger) // up to x image passes in a row are taken after touch ring was touched until noFinger will raise a noMatchFound event
           {
             doImaging = true; // scan another image
             // delay(50);
@@ -219,7 +221,8 @@ Match FingerprintManager::scanFingerprint()
     if (match.returnCode == FINGERPRINT_OK)
     {
       // found a match!
-      finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
+      // Handle these led controls in main
+      // finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
 
       match.scanResult = ScanResult::matchFound;
       match.matchId = finger.fingerID;
@@ -234,7 +237,7 @@ Match FingerprintManager::scanFingerprint()
     {
       Serial.println(String("Did not find a match. (Scan #") + scanPass + String(" of 5)"));
       match.scanResult = ScanResult::noMatchFound;
-      if (scanPass < 5) // max 5 Scans until no match found is given back as result
+      if (scanPass < maxScanPasses) // max 5 Scans until no match found is given back as result
         doAnotherScan = true;
     }
     else
@@ -506,6 +509,18 @@ bool FingerprintManager::isFingerOnSensor()
   return false;
 }
 
+
+
+void FingerprintManager::setLedRingSuccess()
+{
+  finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
+}
+
+void FingerprintManager::setLedRingBell()
+{
+  finger.LEDcontrol(FINGERPRINT_LED_FLASHING, 25, FINGERPRINT_LED_PURPLE, 4);
+}
+
 void FingerprintManager::setLedRingError()
 {
   finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
@@ -618,9 +633,4 @@ void FingerprintManager::exportSensorDB()
 
 void FingerprintManager::importSensorDB()
 {
-}
-
-void FingerprintManager::setLedRingSuccess()
-{
-  finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
 }
