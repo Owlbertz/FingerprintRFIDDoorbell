@@ -36,6 +36,7 @@
 #include "SettingsManager.h"
 #include "global.h"
 #include <RfidManager.h>
+#include <version.h>
 
 // RFID stuff start
 #define RFID_RST_PIN 0 // Configurable, see typical pin layout above
@@ -52,7 +53,7 @@ enum class Mode
   maintenance
 };
 
-const char *VersionInfo = "0.4";
+const char *VersionInfo = VERSION;
 
 // ===================================================================================================================
 // Caution: below are not the credentials for connecting to your home network, they are for the Access Point mode!!!
@@ -383,10 +384,9 @@ void startWebserver()
 
   // Init time by NTP Client
   configTime(gmtOffset_sec, daylightOffset_sec, settingsManager.getAppSettings().ntpServer.c_str());
-  // notifyClients(settingsManager.getAppSettings().ntpServer.c_str());
-  // setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
-  // Core 2.6.0+
-  // configTime("CET-1CEST,M3.5.0,M10.5.0/3", settingsManager.getAppSettings().ntpServer.c_str());  // Zeitzone einstellen https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+  setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+  tzset();
+  notifyClients("Using NTP server: " + settingsManager.getAppSettings().ntpServer);
 
   // webserver for normal operating or wifi config?
   if (currentMode == Mode::wificonfig)
